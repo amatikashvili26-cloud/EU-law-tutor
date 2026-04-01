@@ -5,9 +5,26 @@ const topicStatusSelect = document.getElementById("topicStatusSelect");
 const topicNavigator = document.getElementById("topicNavigator");
 const notesContent = document.getElementById("notesContent");
 const showNotesBtn = document.getElementById("showNotesBtn");
+const showFlashcardsBtn = document.getElementById("showFlashcardsBtn");
 const showQuizBtn = document.getElementById("showQuizBtn");
 const showReviewBtn = document.getElementById("showReviewBtn");
 const notesSection = document.getElementById("notesSection");
+const flashcardSection = document.getElementById("flashcardSection");
+const flashcardTopicLine = document.getElementById("flashcardTopicLine");
+const flashcardDeckSelect = document.getElementById("flashcardDeckSelect");
+const flashcardHardCount = document.getElementById("flashcardHardCount");
+const flashcardEmpty = document.getElementById("flashcardEmpty");
+const flashcardArea = document.getElementById("flashcardArea");
+const flashcardCounter = document.getElementById("flashcardCounter");
+const flashcardFlipBtn = document.getElementById("flashcardFlipBtn");
+const flashcardInner = document.getElementById("flashcardInner");
+const flashcardFront = document.getElementById("flashcardFront");
+const flashcardBack = document.getElementById("flashcardBack");
+const flashcardSideLabel = document.getElementById("flashcardSideLabel");
+const flashcardPrevBtn = document.getElementById("flashcardPrevBtn");
+const flashcardNextBtn = document.getElementById("flashcardNextBtn");
+const flashcardFlipActionBtn = document.getElementById("flashcardFlipActionBtn");
+const flashcardMarkHardBtn = document.getElementById("flashcardMarkHardBtn");
 const quizSection = document.getElementById("quizSection");
 
 const difficultySelect = document.getElementById("difficultySelect");
@@ -30,6 +47,7 @@ const scoreCounter = document.getElementById("scoreCounter");
 const STORAGE_KEY = "mermaidTutorStudyProgress";
 const STUDY_STATUS_STORAGE_KEY = "mermaidTutorTopicStudyStatus";
 const WRONG_ANSWERS_STORAGE_KEY = "mermaidTutorWrongAnswers";
+const FLASHCARD_HARD_STORAGE_KEY = "mermaidTutorFlashHard";
 const TOPIC_STATUS_VALUES = ["not_started", "reading", "revised", "mastered"];
 const LEVEL_KEYS = ["easy", "medium", "hard"];
 
@@ -43,6 +61,22 @@ const dashScoresBody = document.getElementById("dashScoresBody");
 const difficultyControlBox = document.getElementById("difficultyControlBox");
 const reviewModeHint = document.getElementById("reviewModeHint");
 const questionTitleEl = document.getElementById("questionTitle");
+const quizSectionTag = document.getElementById("quizSectionTag");
+const quizTabPractice = document.getElementById("quizTabPractice");
+const quizTabExam = document.getElementById("quizTabExam");
+const examModeIntro = document.getElementById("examModeIntro");
+const examStartBlock = document.getElementById("examStartBlock");
+const examStartBtn = document.getElementById("examStartBtn");
+const examTimerBar = document.getElementById("examTimerBar");
+const examTimerValue = document.getElementById("examTimerValue");
+const examResultsPanel = document.getElementById("examResultsPanel");
+const examResultsScoreLine = document.getElementById("examResultsScoreLine");
+const examWeakSummary = document.getElementById("examWeakSummary");
+const examWeakList = document.getElementById("examWeakList");
+const examExplainList = document.getElementById("examExplainList");
+const examRetryWrongBtn = document.getElementById("examRetryWrongBtn");
+const examNewExamBtn = document.getElementById("examNewExamBtn");
+const quizScoreLine = document.getElementById("quizScoreLine");
 
 function loadTopicStatusMapFromStorage() {
   try {
@@ -89,6 +123,21 @@ let currentScore = 0;
 let currentQuestions = [];
 let reviewMode = false;
 let reviewAfterGraduateNext = false;
+
+let quizPanelMode = "practice";
+let examSessionActive = false;
+let examTimerId = null;
+let examTimeLeftSec = 0;
+let examStoredAnswers = [];
+let lastExamWrongQuestions = [];
+let examRetryRound = false;
+let examProgressTopicId = null;
+let examProgressDifficulty = null;
+
+let flashcardAllCards = [];
+let flashcardViewDeck = [];
+let flashcardIndex = 0;
+let flashcardFlipped = false;
 
 function loadWrongAnswersFromStorage() {
   try {
@@ -176,9 +225,15 @@ function exitReviewMode() {
   difficultyControlBox.classList.remove("hidden");
   reviewModeHint.classList.add("hidden");
   restartBtn.textContent = "🔄 Restart This Level";
+  applyQuizPanelLayout();
 }
 
 function startReviewMistakes() {
+  clearExamTimer();
+  examSessionActive = false;
+  submitBtn.textContent = "✅ Submit Answer";
+  examResultsPanel.classList.add("hidden");
+  quizPanelMode = "practice";
   reviewMode = true;
   reviewAfterGraduateNext = false;
   difficultySelect.value = "";
@@ -201,10 +256,12 @@ function startReviewMistakes() {
     scoreCounter.textContent = "0";
     quizPlaceholder.textContent =
       "No mistakes saved yet. Answer quiz questions — any wrong answer is added here for extra practice.";
+    applyQuizPanelLayout();
     return;
   }
   quizPlaceholder.textContent = "Choose a difficulty level to start the quiz.";
   showCurrentQuestion();
+  applyQuizPanelLayout();
 }
 
 function emptyLevelState() {
@@ -352,6 +409,201 @@ function renderStudyDashboard() {
   });
 }
 
+function normFlashText(s) {
+  return s.replace(/\s+/g, " ").trim();
+}
+
+function shortenFlashBack(text, max) {
+  const t = normFlashText(text);
+  if (t.length <= max) return t;
+  const cut = t.slice(0, max);
+  const lastSpace = cut.lastIndexOf(" ");
+  return (lastSpace > max * 0.6 ? cut.slice(0, lastSpace) : cut).trim() + "…";
+}
+
+function truncateFlashWords(text, maxWords) {
+  const t = normFlashText(text);
+  const words = t.split(" ");
+  if (words.length <= maxWords) return t;
+  return words.slice(0, maxWords).join(" ") + "…";
+}
+
+function parseNotesToFlashcards(notesHtml) {
+  const doc = new DOMParser().parseFromString(notesHtml, "text/html");
+  const block = doc.querySelector(".notes-block");
+  if (!block) return [];
+
+  function textOf(el) {
+    return normFlashText(el.textContent);
+  }
+
+  function collectFromSiblings(arr, startIdx) {
+    const parts = [];
+    for (let j = startIdx; j < arr.length; j++) {
+      const n = arr[j];
+      if (n.nodeType !== 1) continue;
+      if (n.tagName === "H3" || n.tagName === "H4") break;
+      parts.push(textOf(n));
+    }
+    return normFlashText(parts.join(" "));
+  }
+
+  const children = [...block.children];
+  const cards = [];
+  let currentH3 = "";
+
+  for (let i = 0; i < children.length; i++) {
+    const el = children[i];
+    if (!el || el.nodeType !== 1) continue;
+
+    if (el.tagName === "H3") {
+      currentH3 = textOf(el);
+      const next = children[i + 1];
+      if (next && next.classList && next.classList.contains("mini-card")) {
+        i += 1;
+        next.querySelectorAll(":scope > ol > li, :scope > ul > li").forEach((li) => {
+          const full = textOf(li);
+          if (full.length < 12) return;
+          cards.push({
+            front: `${currentH3} — ${truncateFlashWords(full, 16)}`,
+            back: shortenFlashBack(full, 520),
+          });
+        });
+      } else {
+        const back = collectFromSiblings(children, i + 1);
+        if (back.length > 24) {
+          cards.push({
+            front: currentH3,
+            back: shortenFlashBack(back, 480),
+          });
+        }
+      }
+    } else if (el.tagName === "H4") {
+      const front = textOf(el);
+      const back = collectFromSiblings(children, i + 1);
+      if (back.length > 0) {
+        cards.push({ front, back: shortenFlashBack(back, 480) });
+      }
+    } else if (el.classList && el.classList.contains("mini-card")) {
+      const prev = children[i - 1];
+      if (prev && prev.tagName === "H3") continue;
+      el.querySelectorAll(":scope > ol > li, :scope > ul > li").forEach((li) => {
+        const full = textOf(li);
+        if (full.length < 12) return;
+        const prefix = currentH3 ? `${currentH3} — ` : "";
+        cards.push({
+          front: `${prefix}${truncateFlashWords(full, 16)}`,
+          back: shortenFlashBack(full, 520),
+        });
+      });
+    }
+  }
+
+  const seen = new Set();
+  const deduped = [];
+  for (const c of cards) {
+    const k = `${c.front}|${c.back}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    deduped.push(c);
+  }
+  return deduped;
+}
+
+function loadHardFlashcardIds() {
+  try {
+    const raw = localStorage.getItem(FLASHCARD_HARD_STORAGE_KEY);
+    if (!raw) return new Set();
+    const data = JSON.parse(raw);
+    if (!data || data.v !== 1 || !Array.isArray(data.ids)) return new Set();
+    return new Set(data.ids);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveHardFlashcardIds(set) {
+  localStorage.setItem(FLASHCARD_HARD_STORAGE_KEY, JSON.stringify({ v: 1, ids: [...set] }));
+}
+
+function buildFlashcardDeckForTopic(topic) {
+  const parsed = parseNotesToFlashcards(topic.notesHtml);
+  return parsed.map((c, i) => ({ ...c, id: `${topic.id}:${i}` }));
+}
+
+function isFlashcardSectionVisible() {
+  return flashcardSection && !flashcardSection.classList.contains("hidden");
+}
+
+function rebuildFlashcardViewDeck() {
+  flashcardAllCards = buildFlashcardDeckForTopic(currentTopic);
+  const hardOnly = flashcardDeckSelect && flashcardDeckSelect.value === "hard";
+  const hard = loadHardFlashcardIds();
+  flashcardViewDeck = hardOnly
+    ? flashcardAllCards.filter((c) => hard.has(c.id))
+    : flashcardAllCards.slice();
+  if (flashcardIndex >= flashcardViewDeck.length) {
+    flashcardIndex = Math.max(0, flashcardViewDeck.length - 1);
+  }
+  flashcardFlipped = false;
+}
+
+function updateFlashcardHardCountLabel() {
+  if (!flashcardHardCount) return;
+  const hard = loadHardFlashcardIds();
+  const n = flashcardAllCards.filter((c) => hard.has(c.id)).length;
+  flashcardHardCount.textContent = n ? `${n} marked hard in this topic` : "";
+}
+
+function updateFlashcardCardFace() {
+  if (!flashcardViewDeck.length || flashcardIndex < 0 || flashcardIndex >= flashcardViewDeck.length) {
+    return;
+  }
+  const card = flashcardViewDeck[flashcardIndex];
+  flashcardFront.textContent = card.front;
+  flashcardBack.textContent = card.back;
+  flashcardCounter.textContent = `${flashcardIndex + 1} / ${flashcardViewDeck.length}`;
+  flashcardInner.classList.toggle("is-flipped", flashcardFlipped);
+  flashcardSideLabel.textContent = flashcardFlipped ? "Back (explanation)" : "Front (concept)";
+  const hard = loadHardFlashcardIds();
+  const isHard = hard.has(card.id);
+  flashcardMarkHardBtn.textContent = isHard ? "✓ Remove from Hard Set" : "⚡ Mark Hard";
+  flashcardMarkHardBtn.classList.toggle("flashcard-hard-btn--active", isHard);
+}
+
+function renderFlashcardPanel() {
+  if (!flashcardTopicLine) return;
+  flashcardTopicLine.textContent = `Topic: ${currentTopic.title}`;
+  rebuildFlashcardViewDeck();
+  updateFlashcardHardCountLabel();
+
+  if (flashcardViewDeck.length === 0) {
+    flashcardEmpty.classList.remove("hidden");
+    flashcardArea.classList.add("hidden");
+    const hardOnly = flashcardDeckSelect.value === "hard";
+    flashcardEmpty.textContent = hardOnly
+      ? "No hard cards for this topic yet. Study with “All cards” and tap Mark Hard, or pick another topic."
+      : "No flashcards could be built from these notes.";
+    return;
+  }
+
+  flashcardEmpty.classList.add("hidden");
+  flashcardArea.classList.remove("hidden");
+  updateFlashcardCardFace();
+}
+
+function refreshFlashcardsIfVisible() {
+  if (isFlashcardSectionVisible()) {
+    renderFlashcardPanel();
+  }
+}
+
+function toggleFlashcardFlip() {
+  if (!flashcardViewDeck.length) return;
+  flashcardFlipped = !flashcardFlipped;
+  updateFlashcardCardFace();
+}
+
 function getFilteredTopics() {
   const filter = topicStatusFilter.value;
   if (filter === "all") return topics.slice();
@@ -411,6 +663,285 @@ function labelForDifficulty(value) {
   return "";
 }
 
+function formatExamTime(sec) {
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function clearExamTimer() {
+  if (examTimerId !== null) {
+    clearInterval(examTimerId);
+    examTimerId = null;
+  }
+  examTimerBar.classList.remove("exam-timer-low");
+}
+
+function updateExamTimerDisplay() {
+  examTimerValue.textContent = formatExamTime(examTimeLeftSec);
+  if (examTimeLeftSec <= 60) {
+    examTimerBar.classList.add("exam-timer-low");
+  } else {
+    examTimerBar.classList.remove("exam-timer-low");
+  }
+}
+
+function getExamPlaceholderText() {
+  if (!currentDifficulty) return "Choose a difficulty, then tap Start exam.";
+  return "Tap Start exam when you are ready.";
+}
+
+function resetQuizViewForExamSetup() {
+  quizPlaceholder.classList.remove("hidden");
+  quizArea.classList.add("hidden");
+  examResultsPanel.classList.add("hidden");
+  resultBox.classList.add("hidden");
+  nextBtn.classList.add("hidden");
+  restartBtn.classList.add("hidden");
+  submitBtn.disabled = false;
+  submitBtn.textContent = "✅ Submit Answer";
+  questionCounter.textContent = "0 / 0";
+  scoreCounter.textContent = "0";
+  quizPlaceholder.textContent = getExamPlaceholderText();
+}
+
+function applyQuizPanelLayout() {
+  const onExamTab = quizPanelMode === "exam" && !reviewMode;
+  quizTabPractice.classList.toggle("active", quizPanelMode === "practice");
+  quizTabPractice.setAttribute("aria-selected", quizPanelMode === "practice" ? "true" : "false");
+  quizTabExam.classList.toggle("active", quizPanelMode === "exam");
+  quizTabExam.setAttribute("aria-selected", quizPanelMode === "exam" ? "true" : "false");
+
+  if (reviewMode) {
+    quizSectionTag.textContent = "Review Mistakes";
+    examModeIntro.classList.add("hidden");
+    examStartBlock.classList.add("hidden");
+    examTimerBar.classList.add("hidden");
+    quizScoreLine.classList.remove("hidden");
+    quizTabExam.disabled = true;
+    quizTabExam.setAttribute("aria-disabled", "true");
+    return;
+  }
+
+  quizTabExam.disabled = false;
+  quizTabExam.removeAttribute("aria-disabled");
+
+  if (quizPanelMode === "exam") {
+    quizSectionTag.textContent = examSessionActive ? "Exam in progress" : "Exam Mode";
+  } else {
+    quizSectionTag.textContent = "Practice Mode";
+  }
+
+  if (examSessionActive) {
+    examModeIntro.classList.add("hidden");
+    examStartBlock.classList.add("hidden");
+    examTimerBar.classList.remove("hidden");
+    quizScoreLine.classList.add("hidden");
+    difficultyControlBox.classList.add("hidden");
+    return;
+  }
+
+  examTimerBar.classList.add("hidden");
+  difficultyControlBox.classList.remove("hidden");
+
+  if (onExamTab) {
+    const resultsOpen = !examResultsPanel.classList.contains("hidden");
+    if (resultsOpen || examSessionActive) {
+      examModeIntro.classList.add("hidden");
+      examStartBlock.classList.add("hidden");
+    } else {
+      examModeIntro.classList.remove("hidden");
+      examStartBlock.classList.remove("hidden");
+    }
+    quizScoreLine.classList.add("hidden");
+  } else {
+    examModeIntro.classList.add("hidden");
+    examStartBlock.classList.add("hidden");
+    quizScoreLine.classList.remove("hidden");
+  }
+}
+
+function flushCurrentExamQuestionIfUnsaved() {
+  if (!examSessionActive) return;
+  if (examStoredAnswers.length > currentQuestionIndex) return;
+  const q = currentQuestions[currentQuestionIndex];
+  const sel = document.querySelector('input[name="quizOption"]:checked');
+  const ua = sel ? sel.value : null;
+  const isCorrect = ua !== null && ua === q.correctAnswer;
+  const tid = examProgressTopicId || currentTopic.id;
+  const diff = examProgressDifficulty || currentDifficulty;
+  recordQuizAnswer(tid, isCorrect);
+  if (!isCorrect && diff) {
+    addWrongAnswerFromQuiz(tid, diff, q);
+  }
+  examStoredAnswers.push({ question: q, userAnswer: ua, skipped: !ua });
+}
+
+function endExamWithCurrentProgress() {
+  if (!examSessionActive) return;
+  const tid = examProgressTopicId || currentTopic.id;
+  const diff = examProgressDifficulty || currentDifficulty;
+  flushCurrentExamQuestionIfUnsaved();
+  for (let j = examStoredAnswers.length; j < currentQuestions.length; j++) {
+    const q = currentQuestions[j];
+    recordQuizAnswer(tid, false);
+    if (diff) {
+      addWrongAnswerFromQuiz(tid, diff, q);
+    }
+    examStoredAnswers.push({ question: q, userAnswer: null, skipped: true });
+  }
+  clearExamTimer();
+  examSessionActive = false;
+  submitBtn.textContent = "✅ Submit Answer";
+  restartBtn.textContent = "🔄 Restart This Level";
+  applyQuizPanelLayout();
+  showExamResultsUI();
+}
+
+function finishExamDueToTimeout() {
+  if (!examSessionActive) return;
+  endExamWithCurrentProgress();
+}
+
+function startExamTimer() {
+  clearExamTimer();
+  updateExamTimerDisplay();
+  examTimerId = setInterval(() => {
+    examTimeLeftSec -= 1;
+    if (examTimeLeftSec <= 0) {
+      examTimeLeftSec = 0;
+      updateExamTimerDisplay();
+      finishExamDueToTimeout();
+      return;
+    }
+    updateExamTimerDisplay();
+  }, 1000);
+}
+
+function buildExamExplainItem(entry, index) {
+  const q = entry.question;
+  const ua = entry.userAnswer;
+  const ok = ua === q.correctAnswer;
+  const div = document.createElement("div");
+  div.className = "exam-explain-item" + (ok ? "" : " incorrect");
+
+  const num = document.createElement("div");
+  num.className = "exam-q-num";
+  num.textContent = `Question ${index + 1}`;
+  div.appendChild(num);
+
+  const pq = document.createElement("p");
+  pq.textContent = q.question;
+  div.appendChild(pq);
+
+  const py = document.createElement("p");
+  const ly = document.createElement("span");
+  ly.className = "exam-label";
+  ly.textContent = "Your answer: ";
+  py.appendChild(ly);
+  py.appendChild(document.createTextNode(ua || "(no answer)"));
+  div.appendChild(py);
+
+  const pc = document.createElement("p");
+  const lc = document.createElement("span");
+  lc.className = "exam-label";
+  lc.textContent = "Correct: ";
+  pc.appendChild(lc);
+  pc.appendChild(document.createTextNode(q.correctAnswer));
+  div.appendChild(pc);
+
+  const pe = document.createElement("p");
+  const le = document.createElement("span");
+  le.className = "exam-label";
+  le.textContent = "Explanation: ";
+  pe.appendChild(le);
+  pe.appendChild(document.createTextNode(q.explanation || "—"));
+  div.appendChild(pe);
+
+  return div;
+}
+
+function showExamResultsUI() {
+  examResultsPanel.classList.remove("hidden");
+  quizArea.classList.add("hidden");
+  examTimerBar.classList.add("hidden");
+  quizPlaceholder.classList.add("hidden");
+
+  let correct = 0;
+  lastExamWrongQuestions = [];
+  examStoredAnswers.forEach((entry) => {
+    const ok = entry.userAnswer === entry.question.correctAnswer;
+    if (ok) correct++;
+    else lastExamWrongQuestions.push(entry.question);
+  });
+
+  const total = examStoredAnswers.length;
+  examResultsScoreLine.textContent = `Score: ${correct} / ${total}${examRetryRound ? " (retry: incorrect only)" : ""}`;
+
+  examWeakList.innerHTML = "";
+  if (lastExamWrongQuestions.length === 0) {
+    examWeakSummary.textContent =
+      "No weak spots this round — you answered every question correctly.";
+    examRetryWrongBtn.classList.add("hidden");
+  } else {
+    examWeakSummary.textContent = `You missed ${lastExamWrongQuestions.length} question${
+      lastExamWrongQuestions.length === 1 ? "" : "s"
+    }. Review the summaries below, then read the full explanations.`;
+    lastExamWrongQuestions.forEach((q) => {
+      const li = document.createElement("li");
+      const snippet = q.question.length > 120 ? q.question.slice(0, 120).trim() + "…" : q.question;
+      li.textContent = snippet;
+      examWeakList.appendChild(li);
+    });
+    examRetryWrongBtn.classList.remove("hidden");
+  }
+
+  examExplainList.innerHTML = "";
+  examStoredAnswers.forEach((entry, i) => {
+    examExplainList.appendChild(buildExamExplainItem(entry, i));
+  });
+
+  applyQuizPanelLayout();
+}
+
+function beginExamSession(retryWrongOnly) {
+  if (reviewMode) return;
+  if (retryWrongOnly) {
+    if (lastExamWrongQuestions.length === 0) return;
+    currentQuestions = [...lastExamWrongQuestions];
+    examRetryRound = true;
+    if (!examProgressTopicId || !examProgressDifficulty) {
+      examProgressTopicId = currentTopic.id;
+      examProgressDifficulty = currentDifficulty;
+    }
+  } else {
+    if (!currentDifficulty || !currentTopic.quizData[currentDifficulty]) {
+      alert("Choose a difficulty first.");
+      return;
+    }
+    examProgressTopicId = currentTopic.id;
+    examProgressDifficulty = currentDifficulty;
+    currentQuestions = [...currentTopic.quizData[currentDifficulty]];
+    examRetryRound = false;
+  }
+
+  examStoredAnswers = [];
+  currentQuestionIndex = 0;
+  currentScore = 0;
+  updateScore();
+  examSessionActive = true;
+  examTimeLeftSec = Math.max(300, currentQuestions.length * 90);
+  examResultsPanel.classList.add("hidden");
+  clearExamTimer();
+  quizPlaceholder.classList.add("hidden");
+  quizArea.classList.remove("hidden");
+  resultBox.classList.add("hidden");
+  nextBtn.classList.add("hidden");
+  startExamTimer();
+  applyQuizPanelLayout();
+  showCurrentQuestion();
+}
+
 function updateScore() {
   scoreCounter.textContent = currentScore;
 }
@@ -422,16 +953,33 @@ function resetQuizView() {
   nextBtn.classList.add("hidden");
   restartBtn.classList.add("hidden");
   submitBtn.disabled = false;
+  submitBtn.textContent = "✅ Submit Answer";
   questionCounter.textContent = "0 / 0";
   scoreCounter.textContent = "0";
+  examResultsPanel.classList.add("hidden");
+  applyQuizPanelLayout();
 }
 
 function loadTopic(topicId) {
+  if (examSessionActive) {
+    if (
+      !confirm(
+        "Changing topic ends the exam now. Unanswered questions count as wrong. Continue?"
+      )
+    ) {
+      return;
+    }
+    endExamWithCurrentProgress();
+  }
+  examResultsPanel.classList.add("hidden");
   currentTopic = topics.find(t => t.id === topicId) || topics[0];
   notesContent.innerHTML = currentTopic.notesHtml;
   topicStatusSelect.value = getTopicStatus(currentTopic.id);
+  flashcardIndex = 0;
+  flashcardFlipped = false;
   if (reviewMode) {
     startReviewMistakes();
+    refreshFlashcardsIfVisible();
     return;
   }
   exitReviewMode();
@@ -442,6 +990,7 @@ function loadTopic(topicId) {
   currentQuestions = [];
   updateScore();
   resetQuizView();
+  refreshFlashcardsIfVisible();
 }
 
 function showCurrentQuestion() {
@@ -454,6 +1003,31 @@ function showCurrentQuestion() {
   nextBtn.classList.add("hidden");
   restartBtn.classList.remove("hidden");
   submitBtn.disabled = false;
+
+  if (examSessionActive) {
+    questionTitleEl.textContent = "Exam question";
+    const diffKey = examProgressDifficulty || currentDifficulty;
+    difficultyBadge.textContent = `${labelForDifficulty(diffKey)} · Exam`;
+    questionText.textContent = currentQuestion.question;
+    questionCounter.textContent = `${currentQuestionIndex + 1} / ${currentQuestions.length}`;
+    optionsContainer.innerHTML = "";
+    currentQuestion.options.forEach((option) => {
+      const label = document.createElement("label");
+      label.classList.add("option-label");
+      const radio = document.createElement("input");
+      radio.type = "radio";
+      radio.name = "quizOption";
+      radio.value = option;
+      label.appendChild(radio);
+      label.appendChild(document.createTextNode(" " + option));
+      optionsContainer.appendChild(label);
+    });
+    restartBtn.textContent = "⏹️ Exit exam";
+    submitBtn.textContent =
+      currentQuestionIndex >= currentQuestions.length - 1 ? "Finish exam" : "Next question";
+    applyQuizPanelLayout();
+    return;
+  }
 
   if (reviewMode && currentQuestion._wrongEntry) {
     const entry = currentQuestion._wrongEntry;
@@ -481,21 +1055,64 @@ function showCurrentQuestion() {
     label.appendChild(document.createTextNode(" " + option));
     optionsContainer.appendChild(label);
   });
+  submitBtn.textContent = "✅ Submit Answer";
 }
 
 showNotesBtn.addEventListener("click", () => {
+  if (examSessionActive) {
+    if (
+      !confirm("Leaving ends the exam. Unanswered questions count as wrong. Continue?")
+    ) {
+      return;
+    }
+    endExamWithCurrentProgress();
+  }
   notesSection.classList.remove("hidden");
   quizSection.classList.add("hidden");
+  flashcardSection.classList.add("hidden");
   showNotesBtn.classList.add("active");
+  showFlashcardsBtn.classList.remove("active");
   showQuizBtn.classList.remove("active");
   showReviewBtn.classList.remove("active");
+});
+
+showFlashcardsBtn.addEventListener("click", () => {
+  if (examSessionActive) {
+    if (
+      !confirm("Leaving ends the exam. Unanswered questions count as wrong. Continue?")
+    ) {
+      return;
+    }
+    endExamWithCurrentProgress();
+  }
+  if (reviewMode) {
+    exitReviewMode();
+    difficultySelect.value = "";
+    currentDifficulty = "";
+    currentQuestions = [];
+    currentQuestionIndex = 0;
+    currentScore = 0;
+    updateScore();
+    resetQuizView();
+    quizPlaceholder.textContent = "Choose a difficulty level to start the quiz.";
+  }
+  flashcardSection.classList.remove("hidden");
+  notesSection.classList.add("hidden");
+  quizSection.classList.add("hidden");
+  showFlashcardsBtn.classList.add("active");
+  showNotesBtn.classList.remove("active");
+  showQuizBtn.classList.remove("active");
+  showReviewBtn.classList.remove("active");
+  renderFlashcardPanel();
 });
 
 showQuizBtn.addEventListener("click", () => {
   quizSection.classList.remove("hidden");
   notesSection.classList.add("hidden");
+  flashcardSection.classList.add("hidden");
   showQuizBtn.classList.add("active");
   showNotesBtn.classList.remove("active");
+  showFlashcardsBtn.classList.remove("active");
   showReviewBtn.classList.remove("active");
   if (reviewMode) {
     exitReviewMode();
@@ -507,16 +1124,92 @@ showQuizBtn.addEventListener("click", () => {
     updateScore();
     resetQuizView();
   }
-  quizPlaceholder.textContent = "Choose a difficulty level to start the quiz.";
+  quizPlaceholder.textContent =
+    quizPanelMode === "exam" ? getExamPlaceholderText() : "Choose a difficulty level to start the quiz.";
+  applyQuizPanelLayout();
 });
 
 showReviewBtn.addEventListener("click", () => {
+  if (examSessionActive) {
+    if (
+      !confirm("Review mode ends the exam. Unanswered questions count as wrong. Continue?")
+    ) {
+      return;
+    }
+    endExamWithCurrentProgress();
+  }
   quizSection.classList.remove("hidden");
   notesSection.classList.add("hidden");
+  flashcardSection.classList.add("hidden");
   showReviewBtn.classList.add("active");
   showNotesBtn.classList.remove("active");
+  showFlashcardsBtn.classList.remove("active");
   showQuizBtn.classList.remove("active");
   startReviewMistakes();
+});
+
+flashcardDeckSelect.addEventListener("change", () => {
+  flashcardIndex = 0;
+  flashcardFlipped = false;
+  if (isFlashcardSectionVisible()) {
+    renderFlashcardPanel();
+  }
+});
+
+flashcardFlipBtn.addEventListener("click", () => {
+  toggleFlashcardFlip();
+});
+
+flashcardFlipBtn.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();
+    toggleFlashcardFlip();
+  }
+});
+
+flashcardFlipActionBtn.addEventListener("click", () => {
+  toggleFlashcardFlip();
+});
+
+flashcardPrevBtn.addEventListener("click", () => {
+  if (flashcardViewDeck.length === 0) return;
+  flashcardFlipped = false;
+  flashcardIndex = flashcardIndex <= 0 ? flashcardViewDeck.length - 1 : flashcardIndex - 1;
+  updateFlashcardCardFace();
+});
+
+flashcardNextBtn.addEventListener("click", () => {
+  if (flashcardViewDeck.length === 0) return;
+  flashcardFlipped = false;
+  flashcardIndex = flashcardIndex >= flashcardViewDeck.length - 1 ? 0 : flashcardIndex + 1;
+  updateFlashcardCardFace();
+});
+
+flashcardMarkHardBtn.addEventListener("click", () => {
+  if (flashcardViewDeck.length === 0 || flashcardIndex < 0) return;
+  const card = flashcardViewDeck[flashcardIndex];
+  const hard = loadHardFlashcardIds();
+  if (hard.has(card.id)) {
+    hard.delete(card.id);
+  } else {
+    hard.add(card.id);
+  }
+  saveHardFlashcardIds(hard);
+  updateFlashcardHardCountLabel();
+  if (flashcardDeckSelect.value === "hard" && !hard.has(card.id)) {
+    rebuildFlashcardViewDeck();
+    if (flashcardIndex >= flashcardViewDeck.length) {
+      flashcardIndex = Math.max(0, flashcardViewDeck.length - 1);
+    }
+    if (flashcardViewDeck.length === 0) {
+      flashcardEmpty.classList.remove("hidden");
+      flashcardArea.classList.add("hidden");
+      flashcardEmpty.textContent =
+        "No hard cards left in this topic. Switch to “All cards” or choose another topic.";
+      return;
+    }
+  }
+  updateFlashcardCardFace();
 });
 
 topicStatusFilter.addEventListener("change", () => {
@@ -528,10 +1221,89 @@ topicStatusSelect.addEventListener("change", () => {
   renderTopicNavigator();
 });
 
+quizTabPractice.addEventListener("click", () => {
+  if (reviewMode) return;
+  if (examSessionActive) {
+    if (
+      !confirm(
+        "Switching to Practice ends the exam. Unanswered questions count as wrong. Continue?"
+      )
+    ) {
+      return;
+    }
+    endExamWithCurrentProgress();
+    examResultsPanel.classList.add("hidden");
+    quizPanelMode = "practice";
+    applyQuizPanelLayout();
+    if (currentDifficulty) {
+      currentQuestions = [...currentTopic.quizData[currentDifficulty]];
+      currentQuestionIndex = 0;
+      currentScore = 0;
+      updateScore();
+      showCurrentQuestion();
+    } else {
+      resetQuizView();
+    }
+    return;
+  }
+  if (quizPanelMode === "practice") return;
+  quizPanelMode = "practice";
+  examResultsPanel.classList.add("hidden");
+  applyQuizPanelLayout();
+  if (currentDifficulty) {
+    currentQuestions = [...currentTopic.quizData[currentDifficulty]];
+    currentQuestionIndex = 0;
+    currentScore = 0;
+    updateScore();
+    showCurrentQuestion();
+  } else {
+    resetQuizView();
+  }
+});
+
+quizTabExam.addEventListener("click", () => {
+  if (reviewMode) return;
+  if (quizPanelMode === "exam") return;
+  quizPanelMode = "exam";
+  examResultsPanel.classList.add("hidden");
+  resetQuizViewForExamSetup();
+  applyQuizPanelLayout();
+});
+
+examStartBtn.addEventListener("click", () => {
+  beginExamSession(false);
+});
+
+examRetryWrongBtn.addEventListener("click", () => {
+  examResultsPanel.classList.add("hidden");
+  beginExamSession(true);
+});
+
+examNewExamBtn.addEventListener("click", () => {
+  examResultsPanel.classList.add("hidden");
+  examStoredAnswers = [];
+  lastExamWrongQuestions = [];
+  examRetryRound = false;
+  examProgressTopicId = null;
+  examProgressDifficulty = null;
+  resetQuizViewForExamSetup();
+  applyQuizPanelLayout();
+});
+
 difficultySelect.addEventListener("change", () => {
   if (reviewMode) return;
 
   currentDifficulty = difficultySelect.value;
+
+  if (quizPanelMode === "exam") {
+    if (!currentDifficulty) {
+      resetQuizViewForExamSetup();
+    } else {
+      resetQuizViewForExamSetup();
+    }
+    applyQuizPanelLayout();
+    return;
+  }
 
   if (!currentDifficulty) {
     resetQuizView();
@@ -556,6 +1328,28 @@ submitBtn.addEventListener("click", () => {
   const currentQuestion = currentQuestions[currentQuestionIndex];
   const userAnswer = selectedOption.value;
   const isCorrect = userAnswer === currentQuestion.correctAnswer;
+
+  if (examSessionActive) {
+    const tid = examProgressTopicId || currentTopic.id;
+    const diff = examProgressDifficulty || currentDifficulty;
+    recordQuizAnswer(tid, isCorrect);
+    if (!isCorrect && diff) {
+      addWrongAnswerFromQuiz(tid, diff, currentQuestion);
+    }
+    examStoredAnswers.push({ question: currentQuestion, userAnswer });
+    if (currentQuestionIndex >= currentQuestions.length - 1) {
+      clearExamTimer();
+      examSessionActive = false;
+      submitBtn.textContent = "✅ Submit Answer";
+      restartBtn.textContent = "🔄 Restart This Level";
+      applyQuizPanelLayout();
+      showExamResultsUI();
+      return;
+    }
+    currentQuestionIndex += 1;
+    showCurrentQuestion();
+    return;
+  }
 
   resultBox.classList.remove("hidden");
   resultBox.classList.toggle("incorrect", !isCorrect);
@@ -692,6 +1486,14 @@ nextBtn.addEventListener("click", () => {
 });
 
 restartBtn.addEventListener("click", () => {
+  if (examSessionActive) {
+    if (
+      confirm("End this exam? Unanswered questions count as wrong.")
+    ) {
+      endExamWithCurrentProgress();
+    }
+    return;
+  }
   if (reviewMode) {
     startReviewMistakes();
     return;
@@ -707,3 +1509,36 @@ restartBtn.addEventListener("click", () => {
 renderTopicNavigator();
 loadTopic(topics[0].id);
 renderStudyDashboard();
+
+(function initThemeToggle() {
+  const storageKey = "mermaid-tutor-theme";
+  const root = document.documentElement;
+  const btn = document.getElementById("themeToggle");
+  if (!btn) return;
+
+  function setTheme(mode) {
+    const dark = mode === "dark";
+    if (dark) {
+      root.setAttribute("data-theme", "dark");
+      btn.setAttribute("aria-pressed", "true");
+      btn.setAttribute("aria-label", "Switch to light mode");
+    } else {
+      root.removeAttribute("data-theme");
+      btn.setAttribute("aria-pressed", "false");
+      btn.setAttribute("aria-label", "Switch to dark mode");
+    }
+  }
+
+  const stored = localStorage.getItem(storageKey);
+  if (stored === "dark" || stored === "light") {
+    setTheme(stored);
+  } else {
+    setTheme(window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  }
+
+  btn.addEventListener("click", () => {
+    const next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    localStorage.setItem(storageKey, next);
+    setTheme(next);
+  });
+})();
