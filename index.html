@@ -57,6 +57,57 @@
       </div>
     </section>
 
+    <section class="card study-dashboard" aria-labelledby="dashboard-heading">
+      <div class="section-top">
+        <h2 id="dashboard-heading">📊 Study dashboard</h2>
+        <span class="section-tag">Your progress</span>
+      </div>
+
+      <div class="dashboard-stats" role="group" aria-label="Summary statistics">
+        <div class="dash-stat">
+          <span class="dash-stat-value" id="dashTopicsCompleted">0</span>
+          <span class="dash-stat-label">topics fully completed</span>
+        </div>
+        <div class="dash-stat">
+          <span class="dash-stat-value" id="dashQuestionsAnswered">0</span>
+          <span class="dash-stat-label">questions answered</span>
+        </div>
+        <div class="dash-stat dash-stat-wide">
+          <span class="dash-stat-label dash-stat-label-inline">Weakest focus</span>
+          <p class="dash-weakest-text" id="dashWeakestTopic">Answer a few quiz questions to see this.</p>
+        </div>
+      </div>
+
+      <div class="dashboard-course-progress">
+        <div class="dashboard-progress-head">
+          <span class="dashboard-progress-title">Overall course completion</span>
+          <span class="dashboard-progress-pct" id="dashCoursePct">0%</span>
+        </div>
+        <div class="dashboard-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-labelledby="dashCourseProgressLabel" id="dashCourseProgressBar">
+          <span id="dashCourseProgressLabel" class="visually-hidden">Course completion percentage</span>
+          <div class="dashboard-progress-fill" id="dashCourseProgressFill"></div>
+        </div>
+        <p class="dashboard-progress-hint">Each topic has three levels; finishing a level (last question) counts toward completion.</p>
+      </div>
+
+      <div class="dashboard-scores-block">
+        <h3 class="dashboard-scores-title">Best score by topic and level</h3>
+        <div class="dashboard-scores-table-wrap">
+          <table class="dashboard-scores-table" id="dashScoresTable">
+            <thead>
+              <tr>
+                <th scope="col">Topic</th>
+                <th scope="col">Level 1</th>
+                <th scope="col">Level 2</th>
+                <th scope="col">Level 3</th>
+              </tr>
+            </thead>
+            <tbody id="dashScoresBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
     <section class="card top-controls">
       <div class="section-top">
         <h2>🌊 Choose Topic</h2>
@@ -64,14 +115,34 @@
       </div>
 
       <div class="topic-toolbar">
-        <div class="topic-picker">
-          <label for="topicSelect">Topic:</label>
-          <select id="topicSelect"></select>
+        <div class="topic-picker-column">
+          <div class="topic-filter-row">
+            <label for="topicStatusFilter">Filter by status</label>
+            <select id="topicStatusFilter">
+              <option value="all">All topics</option>
+              <option value="not_started">Not started</option>
+              <option value="reading">Reading</option>
+              <option value="revised">Revised</option>
+              <option value="mastered">Mastered</option>
+            </select>
+          </div>
+          <div class="topic-current-status-row">
+            <label for="topicStatusSelect">Study status for this topic</label>
+            <select id="topicStatusSelect">
+              <option value="not_started">Not started</option>
+              <option value="reading">Reading</option>
+              <option value="revised">Revised</option>
+              <option value="mastered">Mastered</option>
+            </select>
+          </div>
+          <p class="topic-nav-heading" id="topicNavHeading">Topics</p>
+          <div id="topicNavigator" class="topic-navigator" role="group" aria-labelledby="topicNavHeading"></div>
         </div>
 
         <nav class="main-menu">
           <button id="showNotesBtn" class="menu-btn active">📘 Full Class Notes</button>
           <button id="showQuizBtn" class="menu-btn">🧠 Multiple Choice Quiz</button>
+          <button id="showReviewBtn" class="menu-btn">🔁 Review Mistakes</button>
         </nav>
       </div>
     </section>
@@ -92,7 +163,7 @@
       </div>
 
       <div class="controls-grid">
-        <div class="control-box">
+        <div class="control-box" id="difficultyControlBox">
           <label for="difficultySelect">Choose difficulty:</label>
           <select id="difficultySelect">
             <option value="">-- Select difficulty --</option>
@@ -107,6 +178,10 @@
           <p><strong>⭐ Score:</strong> <span id="scoreCounter">0</span></p>
         </div>
       </div>
+
+      <p id="reviewModeHint" class="review-mode-hint hidden" role="status">
+        Questions you missed in quizzes. Answer each correctly twice to remove it from this list.
+      </p>
 
       <div id="quizPlaceholder" class="placeholder">
         Choose a difficulty level to start the quiz.
